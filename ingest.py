@@ -4,11 +4,11 @@ import argparse
 from pathlib import Path
 import pypdf
 import docx
-from qdrant_client import QdrantClient
 from qdrant_client.http import models
 
-# Import configurations
+# Import configurations and helpers
 import config
+from qdrant_helper import get_qdrant_client
 
 def parse_txt_or_md(file_path: Path) -> str:
     """Reads a text or markdown file."""
@@ -110,98 +110,90 @@ def ingest_documents(reset_db: bool = False):
         return
 
     print("Initializing Qdrant client...")
-    # Initialize Qdrant Client (local serverless storage)
-    client = QdrantClient(path=str(config.QDRANT_DIR))
+    client = get_qdrant_client()
     
-    try:
-        # Set the embedding model (FastEmbed integration)
-        client.set_model(config.EMBED_MODEL)
+    collection_name = config.QDRANT_COLLECTION
+    
+    # Reset collection if requested
+    if reset_db and client.collection_exists(collection_name):
+        print(f"Resetting collection: {collection_name}")
+        client.delete_collection(collection_name)
         
-        collection_name = config.QDRANT_COLLECTION
+    # Create collection if it doesn't exist
+    if not client.collection_exists(collection_name):
+        print(f"Creating Qdrant collection: {collection_name}")
+        client.create_collection(
+            collection_name=collection_name,
+            vectors_config=client.get_fastembed_vector_params()
+        )
+    
+    print(f"Found {len(files_to_process)} document(s) to process.")
+    
+    for file_path in files_to_process:
+        filename = file_path.name
+        print(f"\nProcessing: {filename}...")
         
-        # Reset collection if requested
-        if reset_db and client.collection_exists(collection_name):
-            print(f"Resetting collection: {collection_name}")
-            client.delete_collection(collection_name)
+        parser = get_file_parser(file_path.suffix)
+        if not parser:
+            print(f"Skipping unsupported file type: {filename}")
+            continue
             
-        # Create collection if it doesn't exist
-        if not client.collection_exists(collection_name):
-            print(f"Creating Qdrant collection: {collection_name}")
-            client.create_collection(
-                collection_name=collection_name,
-                vectors_config=client.get_fastembed_vector_params()
-            )
-        
-        print(f"Found {len(files_to_process)} document(s) to process.")
-        
-        for file_path in files_to_process:
-            filename = file_path.name
-            print(f"\nProcessing: {filename}...")
+        # Parse text
+        text = parser(file_path)
+        if not text.strip():
+            print(f"Skipping empty or unreadable file: {filename}")
+            continue
             
-            parser = get_file_parser(file_path.suffix)
-            if not parser:
-                print(f"Skipping unsupported file type: {filename}")
-                continue
-                
-            # Parse text
-            text = parser(file_path)
-            if not text.strip():
-                print(f"Skipping empty or unreadable file: {filename}")
-                continue
-                
-            # Chunk text
-            chunks = chunk_text(text, config.CHUNK_SIZE, config.CHUNK_OVERLAP)
-            if not chunks:
-                print(f"No chunks created for: {filename}")
-                continue
-                
-            print(f"Created {len(chunks)} chunks for {filename}.")
+        # Chunk text
+        chunks = chunk_text(text, config.CHUNK_SIZE, config.CHUNK_OVERLAP)
+        if not chunks:
+            print(f"No chunks created for: {filename}")
+            continue
             
-            # If database is NOT reset, delete existing records for this file to avoid duplicates
-            if not reset_db:
-                try:
-                    # Delete old chunks for this file
-                    client.delete(
-                        collection_name=collection_name,
-                        points_selector=models.Filter(
-                            must=[
-                                models.FieldCondition(
-                                    key="document_name",
-                                    match=models.MatchValue(value=filename)
-                                )
-                            ]
-                        )
+        print(f"Created {len(chunks)} chunks for {filename}.")
+        
+        # If database is NOT reset, delete existing records for this file to avoid duplicates
+        if not reset_db:
+            try:
+                # Delete old chunks for this file
+                client.delete(
+                    collection_name=collection_name,
+                    points_selector=models.Filter(
+                        must=[
+                            models.FieldCondition(
+                                key="document_name",
+                                match=models.MatchValue(value=filename)
+                            )
+                        ]
                     )
-                except Exception as e:
-                    # If collection is empty, delete might warn/fail, which is fine
-                    pass
+                )
+            except Exception as e:
+                # If collection is empty, delete might warn/fail, which is fine
+                pass
 
-            # Prepare records for ingestion
-            chunk_texts = []
-            chunk_metadatas = []
+        # Prepare records for ingestion
+        chunk_texts = []
+        chunk_metadatas = []
+        
+        for idx, chunk in enumerate(chunks):
+            chunk_texts.append(chunk)
+            chunk_metadatas.append({
+                "document_name": filename,
+                "file_path": str(file_path),
+                "chunk_index": idx,
+                "total_chunks": len(chunks)
+            })
             
-            for idx, chunk in enumerate(chunks):
-                chunk_texts.append(chunk)
-                chunk_metadatas.append({
-                    "document_name": filename,
-                    "file_path": str(file_path),
-                    "chunk_index": idx,
-                    "total_chunks": len(chunks)
-                })
-                
-            # Insert chunks to Qdrant (auto-embeds using FastEmbed)
-            print(f"Uploading vectors for {filename} to Qdrant...")
-            client.add(
-                collection_name=collection_name,
-                documents=chunk_texts,
-                metadata=chunk_metadatas
-            )
-            print(f"Successfully indexed {filename}!")
-            
-        print("\nIngestion process completed successfully!")
-    finally:
-        print("Closing Qdrant client connection...")
-        client.close()
+        # Insert chunks to Qdrant (auto-embeds using FastEmbed)
+        print(f"Uploading vectors for {filename} to Qdrant...")
+        client.add(
+            collection_name=collection_name,
+            documents=chunk_texts,
+            metadata=chunk_metadatas
+        )
+        print(f"Successfully indexed {filename}!")
+        
+    print("\nIngestion process completed successfully!")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ingest documents into Qdrant vector database.")

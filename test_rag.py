@@ -1,11 +1,11 @@
 import os
 from pathlib import Path
-from qdrant_client import QdrantClient
 
 # Import system modules
 import config
 import ingest
 import query
+from qdrant_helper import get_qdrant_client
 
 def setup_test_documents():
     """Creates mock documentation files in the data/documents directory."""
@@ -51,8 +51,7 @@ def run_tests():
     
     # Verify vector search
     print("\n--- Verifying Qdrant Vector Search ---")
-    client = QdrantClient(path=str(config.QDRANT_DIR))
-    client.set_model(config.EMBED_MODEL)
+    client = get_qdrant_client()
     
     test_question = "Who is the Project Lead for Radar?"
     results = client.query(
@@ -67,16 +66,15 @@ def run_tests():
         print(f"  [{idx}] Source: {doc_name} | Score: {point.score * 100:.1f}%")
         # Print a snippet of the text
         snippet = point.metadata.get("document") or point.payload.get("document", "")
-        print(f"      Snippet: {snippet[:120].replace('\n', ' ')}...")
+        print(f"      Snippet: {snippet[:120].replace(chr(10), ' ')}...")
         
     # Check if the correct file was fetched
     top_match = results[0].metadata.get("document_name")
     assert top_match == "keynotes_radar_sync.md", f"Expected keynotes_radar_sync.md as top match, got {top_match}"
     print("Vector Search Validation: PASSED!")
-    client.close()
     
     # Run complete RAG query against LLM
-    print("\n--- Running End-to-End RAG Query (FastEmbed + Qdrant + Qwen3:4b) ---")
+    print("\n--- Running End-to-End RAG Query (FastEmbed + Qdrant Cloud + Groq) ---")
     print(f"Question: 'What is the token expiration duration and the port of the Auth service?'")
     query.run_rag_query("What is the token expiration duration and the port of the Auth service?")
     
