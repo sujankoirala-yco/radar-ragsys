@@ -1,7 +1,9 @@
 import sys
 from pathlib import Path
 from qdrant_client import QdrantClient
-import ollama
+import os
+from dotenv import load_dotenv
+from groq import Groq
 
 # Import configurations
 import config
@@ -79,39 +81,35 @@ def run_rag_query(query_str: str, top_k: int = 3, stream: bool = True):
     print("AI RESPONSE:")
     print("="*50)
 
-    # Call Ollama LLM
+    # Call Groq LLM
     try:
+        # Load environment variables (in case not loaded elsewhere)
+        load_dotenv()
+        groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        # Create chat completion request
+        response = groq_client.chat.completions.create(
+            model=config.GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": query_str}
+            ],
+            temperature=0.2,
+            stream=stream
+        )
         if stream:
-            response_stream = ollama.chat(
-                model=config.OLLAMA_MODEL,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": query_str}
-                ],
-                options={"temperature": 0.2},
-                stream=True
-            )
-            
-            full_response = ""
-            for chunk in response_stream:
-                content = chunk['message']['content']
+            # Streaming response yields chunks
+            for chunk in response:
+                # Each chunk contains a 'choices' list with a 'delta' dict
+                delta = chunk.choices[0].delta
+                content = getattr(delta, "content", "")
                 print(content, end="", flush=True)
-                full_response += content
             print()
         else:
-            response = ollama.chat(
-                model=config.OLLAMA_MODEL,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": query_str}
-                ],
-                options={"temperature": 0.2}
-            )
-            answer = response['message']['content']
+            answer = response.choices[0].message.content
             print(answer)
     except Exception as e:
-        print(f"\nError communicating with Ollama: {e}")
-        print("Please ensure that Ollama is running and the model is accessible.")
+        print(f"\nError communicating with Groq API: {e}")
+        print("Please ensure that the GROQ_API_KEY is set correctly and the model name is valid.")
         return
 
     # Print source documents summary

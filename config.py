@@ -19,6 +19,7 @@ EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 # Ollama configurations
 OLLAMA_URL = "http://localhost:11434"
 OLLAMA_MODEL = "qwen3:4b"
+GROQ_MODEL = "llama-3.3-70b-versatile"
 
 # Chunking configurations
 CHUNK_SIZE = 600      # length in characters
