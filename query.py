@@ -1,12 +1,12 @@
 import sys
-from pathlib import Path
-from qdrant_client import QdrantClient
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 from groq import Groq
 
-# Import configurations
+# Import configurations and helpers
 import config
+from qdrant_helper import get_qdrant_client
 
 def format_score(score: float) -> str:
     """Formats similarity score as percentage."""
@@ -14,9 +14,8 @@ def format_score(score: float) -> str:
 
 def run_rag_query(query_str: str, top_k: int = 3, stream: bool = True):
     """Executes the RAG pipeline: retrieves context, formats prompt, and gets LLM answer."""
-    # Ensure Qdrant collection exists
-    client = QdrantClient(path=str(config.QDRANT_DIR))
-    client.set_model(config.EMBED_MODEL)
+    # Connect to Qdrant (cloud or local based on config)
+    client = get_qdrant_client()
     
     if not client.collection_exists(config.QDRANT_COLLECTION):
         print(f"Error: Collection '{config.QDRANT_COLLECTION}' does not exist.")
@@ -32,7 +31,6 @@ def run_rag_query(query_str: str, top_k: int = 3, stream: bool = True):
         query_text=query_str,
         limit=top_k
     )
-    client.close()
     
     if not search_results:
         print("No matching information found in the document database.")
@@ -83,7 +81,6 @@ def run_rag_query(query_str: str, top_k: int = 3, stream: bool = True):
 
     # Call Groq LLM
     try:
-        # Load environment variables (in case not loaded elsewhere)
         load_dotenv()
         groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
         # Create chat completion request
@@ -99,10 +96,11 @@ def run_rag_query(query_str: str, top_k: int = 3, stream: bool = True):
         if stream:
             # Streaming response yields chunks
             for chunk in response:
-                # Each chunk contains a 'choices' list with a 'delta' dict
                 delta = chunk.choices[0].delta
-                content = getattr(delta, "content", "")
-                print(content, end="", flush=True)
+                content = getattr(delta, "content", None)
+                # Skip None content (e.g. role-only or finish chunks)
+                if content:
+                    print(content, end="", flush=True)
             print()
         else:
             answer = response.choices[0].message.content
@@ -130,7 +128,7 @@ def run_rag_query(query_str: str, top_k: int = 3, stream: bool = True):
 
 def interactive_loop():
     print("==================================================")
-    print("Radar RAG CLI System (Qdrant + Qwen3:4b)")
+    print("Radar RAG CLI System (Qdrant Cloud + Groq)")
     print("Type 'exit' or 'quit' to close.")
     print("==================================================")
     
