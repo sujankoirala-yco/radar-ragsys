@@ -39,5 +39,5 @@ CHUNK_SIZE = 600      # length in characters
 CHUNK_OVERLAP = 80    # overlap in characters
 
 # SharePoint configurations
-SHAREPOINT_TENANT = "ycopvtltd"
+SHAREPOINT_TENANT = "siammakrogroup"
 SHAREPOINT_FOLDER_PATH = "/sites/RAGSys_RADAR/Shared Documents/Batch Issues"
