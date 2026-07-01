@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 import pypdf
 import docx
+import openpyxl
 from qdrant_client.http import models
 
 # Import configurations and helpers
@@ -42,6 +43,32 @@ def parse_docx(file_path: Path) -> str:
         return "\n".join(text)
     except Exception as e:
         print(f"Error reading DOCX file {file_path.name}: {e}")
+        return ""
+
+def parse_xlsx(file_path: Path) -> str:
+    """
+    Extracts text from an Excel workbook (.xlsx / .xls).
+    Each sheet is labelled as a section header, and each row is rendered as
+    tab-separated values so the LLM can reason about the tabular structure.
+    Empty rows are skipped.
+    """
+    try:
+        wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+        sections = []
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            rows_text = []
+            for row in ws.iter_rows(values_only=True):
+                # Skip entirely empty rows
+                cell_values = [str(c) if c is not None else "" for c in row]
+                if any(v.strip() for v in cell_values):
+                    rows_text.append("\t".join(cell_values))
+            if rows_text:
+                sections.append(f"[Sheet: {sheet_name}]\n" + "\n".join(rows_text))
+        wb.close()
+        return "\n\n".join(sections)
+    except Exception as e:
+        print(f"Error reading Excel file {file_path.name}: {e}")
         return ""
 
 def chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
@@ -93,12 +120,14 @@ def get_file_parser(suffix: str):
         return parse_pdf
     elif suffix == ".docx":
         return parse_docx
+    elif suffix in [".xlsx", ".xls"]:
+        return parse_xlsx
     return None
 
 def ingest_documents(reset_db: bool = False):
     # Scan documents folder
     docs_path = Path(config.DOCS_DIR)
-    supported_extensions = {".txt", ".md", ".pdf", ".docx"}
+    supported_extensions = {".txt", ".md", ".pdf", ".docx", ".xlsx", ".xls"}
     
     files_to_process = [
         f for f in docs_path.iterdir()
@@ -107,7 +136,7 @@ def ingest_documents(reset_db: bool = False):
     
     if not files_to_process:
         print(f"No documents found in '{config.DOCS_DIR}'.")
-        print("Please place some .txt, .md, .pdf, or .docx files in that directory.")
+        print("Please place some .txt, .md, .pdf, .docx, or .xlsx files in that directory.")
         return
 
     print("Initializing Qdrant client...")
