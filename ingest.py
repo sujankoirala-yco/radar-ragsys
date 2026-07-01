@@ -9,6 +9,7 @@ from qdrant_client.http import models
 # Import configurations and helpers
 import config
 from qdrant_helper import get_qdrant_client
+from urlBuilder import build_sharepoint_file_url
 
 def parse_txt_or_md(file_path: Path) -> str:
     """Reads a text or markdown file."""
@@ -181,7 +182,12 @@ def ingest_documents(reset_db: bool = False):
                 "document_name": filename,
                 "file_path": str(file_path),
                 "chunk_index": idx,
-                "total_chunks": len(chunks)
+                "total_chunks": len(chunks),
+                "sharepoint_url": build_sharepoint_file_url(
+                    tenant=config.SHAREPOINT_TENANT,
+                    folder_path=config.SHAREPOINT_FOLDER_PATH,
+                    file_name=filename
+                )
             })
             
         # Insert chunks to Qdrant (auto-embeds using FastEmbed)

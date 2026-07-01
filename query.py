@@ -49,13 +49,15 @@ def run_rag_query(query_str: str, top_k: int = 3, stream: bool = True):
         
         doc_name = metadata.get("document_name", "Unknown Source")
         chunk_idx = metadata.get("chunk_index", 0)
+        sharepoint_url = metadata.get("sharepoint_url", None)
         
         context_parts.append(f"Source: {doc_name} (Chunk {chunk_idx})\nContent: {text}")
         
         # Keep track of unique sources for summary output
         sources.append({
             "name": doc_name,
-            "score": score
+            "score": score,
+            "url": sharepoint_url
         })
 
     # Combine context
@@ -119,11 +121,16 @@ def run_rag_query(query_str: str, top_k: int = 3, stream: bool = True):
     unique_sources = {}
     for s in sources:
         name = s["name"]
-        if name not in unique_sources or s["score"] > unique_sources[name]:
-            unique_sources[name] = s["score"]
+        if name not in unique_sources or s["score"] > unique_sources[name]["score"]:
+            unique_sources[name] = {"score": s["score"], "url": s["url"]}
             
-    for idx, (name, score) in enumerate(unique_sources.items(), 1):
-        print(f"{idx}. {name} (Relevance Score: {format_score(score)})")
+    for idx, (name, info) in enumerate(unique_sources.items(), 1):
+        url = info["url"]
+        if url:
+            print(f"{idx}. {name} (Relevance Score: {format_score(info['score'])})")
+            print(f"   Link: {url}")
+        else:
+            print(f"{idx}. {name} (Relevance Score: {format_score(info['score'])})")
     print("="*50 + "\n")
 
 def interactive_loop():
