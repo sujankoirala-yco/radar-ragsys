@@ -16,9 +16,18 @@ DOCS_DIR.mkdir(parents=True, exist_ok=True)
 QDRANT_DIR.mkdir(parents=True, exist_ok=True)
 
 # Qdrant configurations
-QDRANT_COLLECTION = "radar_knowledge_base"
 # Default embedding model for FastEmbed (BGE-small-en-v1.5)
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"
+
+# Available knowledge base collections
+# Each entry: collection_name -> display label
+KNOWLEDGE_BASES = {
+    "batch_issues_knowledge_base":  "Batch Issues",
+    "system_design_knowledge_base": "System Design",
+}
+
+# Default collection (kept for backward-compat with CLI query.py)
+QDRANT_COLLECTION = "batch_issues_knowledge_base"
 
 # Qdrant Cloud configurations (loaded from .env)
 QDRANT_URL = os.getenv("QDRANT_URL", "")
@@ -40,4 +49,12 @@ CHUNK_OVERLAP = 80    # overlap in characters
 
 # SharePoint configurations
 SHAREPOINT_TENANT = "siammakrogroup"
-SHAREPOINT_FOLDER_PATH = "/sites/RAGSys_RADAR/Shared Documents/Batch Issues"
+
+# Folder path per knowledge base collection
+SHAREPOINT_FOLDER_PATHS = {
+    "batch_issues_knowledge_base":  "/sites/RAGSys_RADAR/Shared Documents/Batch Issues",
+    "system_design_knowledge_base": "/sites/RAGSys_RADAR/Shared Documents/System Design",
+}
+
+# Fallback for backward-compat
+SHAREPOINT_FOLDER_PATH = SHAREPOINT_FOLDER_PATHS["batch_issues_knowledge_base"]

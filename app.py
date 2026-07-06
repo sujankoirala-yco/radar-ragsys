@@ -43,11 +43,11 @@ def get_client():
     return get_qdrant_client()
 
 
-def ensure_collection(client):
+def ensure_collection(client, collection_name: str):
     """Create the Qdrant collection if it doesn't exist yet."""
-    if not client.collection_exists(config.QDRANT_COLLECTION):
+    if not client.collection_exists(collection_name):
         client.create_collection(
-            collection_name=config.QDRANT_COLLECTION,
+            collection_name=collection_name,
             vectors_config=client.get_fastembed_vector_params(),
         )
 
@@ -59,7 +59,21 @@ def ingest_tab():
     st.header("📥 Ingest Documents")
     st.caption(
         "Upload one or more documents. They will be saved to the documents folder "
-        "and indexed into the Qdrant knowledge base automatically."
+        "and indexed into the selected Qdrant knowledge base automatically."
+    )
+
+    # ── Knowledge base selector ──
+    kb_label = st.selectbox(
+        "Target knowledge base",
+        options=list(config.KNOWLEDGE_BASES.values()),
+        help="Choose which knowledge base to ingest documents into.",
+    )
+    # Resolve label → collection name
+    collection_name = next(
+        k for k, v in config.KNOWLEDGE_BASES.items() if v == kb_label
+    )
+    sharepoint_folder = config.SHAREPOINT_FOLDER_PATHS.get(
+        collection_name, config.SHAREPOINT_FOLDER_PATH
     )
 
     uploaded_files = st.file_uploader(
@@ -73,7 +87,7 @@ def ingest_tab():
     reset_db = col1.checkbox(
         "Reset collection first",
         value=False,
-        help="Deletes ALL existing vectors before ingesting. Use with caution.",
+        help="Deletes ALL existing vectors in the selected collection before ingesting. Use with caution.",
     )
 
     if col2.button("⚡ Ingest selected files", disabled=not uploaded_files, type="primary"):
@@ -82,13 +96,13 @@ def ingest_tab():
             return
 
         client = get_client()
-        ensure_collection(client)
+        ensure_collection(client, collection_name)
 
         # Optionally reset
-        if reset_db and client.collection_exists(config.QDRANT_COLLECTION):
-            client.delete_collection(config.QDRANT_COLLECTION)
-            ensure_collection(client)
-            st.info("Collection reset.")
+        if reset_db and client.collection_exists(collection_name):
+            client.delete_collection(collection_name)
+            ensure_collection(client, collection_name)
+            st.info(f"Collection **{kb_label}** reset.")
 
         progress = st.progress(0, text="Starting…")
         log = st.empty()
@@ -129,7 +143,7 @@ def ingest_tab():
             if not reset_db:
                 try:
                     client.delete(
-                        collection_name=config.QDRANT_COLLECTION,
+                        collection_name=collection_name,
                         points_selector=qdrant_models.Filter(
                             must=[
                                 qdrant_models.FieldCondition(
@@ -145,7 +159,7 @@ def ingest_tab():
             # ── Build metadata & upload ──
             sharepoint_url = build_sharepoint_file_url(
                 tenant=config.SHAREPOINT_TENANT,
-                folder_path=config.SHAREPOINT_FOLDER_PATH,
+                folder_path=sharepoint_folder,
                 file_name=filename,
             )
 
@@ -162,13 +176,13 @@ def ingest_tab():
             ]
 
             client.add(
-                collection_name=config.QDRANT_COLLECTION,
+                collection_name=collection_name,
                 documents=chunk_texts,
                 metadata=chunk_metadatas,
             )
 
             messages.append(
-                f"  ✅ Indexed **{len(chunks)} chunks** from `{filename}`"
+                f"  ✅ Indexed **{len(chunks)} chunks** into **{kb_label}** from `{filename}`"
             )
             log.markdown("\n\n".join(messages))
             progress.progress(
@@ -177,7 +191,7 @@ def ingest_tab():
             )
 
         progress.progress(1.0, text="Done!")
-        st.success("Ingestion complete!")
+        st.success(f"Ingestion into **{kb_label}** complete!")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -185,11 +199,22 @@ def ingest_tab():
 # ═══════════════════════════════════════════════════════════════════════════
 def query_tab():
     st.header("💬 Ask the Knowledge Base")
-    st.caption("Questions are answered using only the documents in the knowledge base.")
+    st.caption("Questions are answered using only the documents in the selected knowledge base.")
 
     # ── Sidebar settings ──
     with st.sidebar:
         st.subheader("⚙️ Query Settings")
+
+        kb_label = st.selectbox(
+            "Knowledge base",
+            options=list(config.KNOWLEDGE_BASES.values()),
+            help="Choose which knowledge base to search.",
+            key="query_kb",
+        )
+        collection_name = next(
+            k for k, v in config.KNOWLEDGE_BASES.items() if v == kb_label
+        )
+
         top_k = st.slider("Number of source chunks", min_value=1, max_value=10, value=3)
         st.markdown("---")
         if st.button("🗑️ Clear chat history"):
@@ -207,7 +232,7 @@ def query_tab():
                 _render_sources(msg["sources"])
 
     # ── Input ──
-    query = st.chat_input("Ask a question about your documents…")
+    query = st.chat_input(f"Ask a question about {kb_label}…")
     if not query:
         return
 
@@ -219,14 +244,14 @@ def query_tab():
     # ── RAG pipeline ──
     client = get_client()
 
-    if not client.collection_exists(config.QDRANT_COLLECTION):
+    if not client.collection_exists(collection_name):
         with st.chat_message("assistant"):
-            st.error("No knowledge base found. Please ingest some documents first.")
+            st.error(f"No knowledge base found for **{kb_label}**. Please ingest some documents first.")
         return
 
-    with st.spinner("Searching knowledge base…"):
+    with st.spinner(f"Searching {kb_label}…"):
         results = client.query(
-            collection_name=config.QDRANT_COLLECTION,
+            collection_name=collection_name,
             query_text=query,
             limit=top_k,
         )
